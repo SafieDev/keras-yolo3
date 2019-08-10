@@ -5,6 +5,7 @@ Class definition of YOLO_v3 style detection model on image and video
 
 import colorsys
 import os
+from io import BytesIO
 from timeit import default_timer as timer
 
 import numpy as np
@@ -99,7 +100,7 @@ class YOLO(object):
                 score_threshold=self.score, iou_threshold=self.iou)
         return boxes, scores, classes
 
-    def detect_image(self, image):
+    def detect_object(self, image, rectangle_class=None):
         if self.model_image_size != (None, None):
             assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
             assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
@@ -110,9 +111,9 @@ class YOLO(object):
             boxed_image = letterbox_image(image, new_image_size)
         image_data = np.array(boxed_image, dtype='float32')
 
-        print(image_data.shape)
         image_data /= 255.
         image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
+        thickness = (image.size[0] + image.size[1]) // 300
 
         out_boxes, out_scores, out_classes = self.sess.run(
             [self.boxes, self.scores, self.classes],
@@ -122,7 +123,7 @@ class YOLO(object):
                 K.learning_phase(): 0
             })
 
-        results = []
+        annotations = []
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
             box = out_boxes[i]
@@ -133,7 +134,7 @@ class YOLO(object):
             left = max(0, np.floor(left + 0.5).astype('int32'))
             bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
             right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-            results.append({
+            annotations.append({
                 "class": str(predicted_class),
                 "score": float(score),
                 "left": int(left),
@@ -141,7 +142,21 @@ class YOLO(object):
                 "right": int(right), 
                 "bottom": int(bottom)
             })
-        return results
+
+            draw = ImageDraw.Draw(image)
+            if rectangle_class is None or rectangle_class == str(predicted_class):
+                for i in range(thickness):
+                    draw.rectangle(
+                        [left + i, top + i, right - i, bottom - i],
+                        outline=self.colors[c])
+
+        return image_to_byte_array(image), annotations
 
     def close_session(self):
         self.sess.close()
+
+def image_to_byte_array(image):
+    buffer = BytesIO()
+    image.save(buffer, format=image.format)
+    return buffer.getvalue()
+
